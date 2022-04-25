@@ -1,0 +1,462 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Mar 25 18:56:31 2022
+
+@author: racfl
+"""
+
+import numpy as np
+import pandas as pd
+from sklearn import datasets
+from sklearn.model_selection import train_test_split
+
+from keras import models
+from keras import layers
+from tensorflow.keras.utils import to_categorical
+import keras
+
+import matplotlib.pyplot as plt
+
+import pandas as pd
+import numpy as np
+from scipy.stats import ttest_ind
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
+import seaborn as sns
+import matplotlib.pyplot as plt
+from statsmodels.graphics.gofplots import qqplot
+from sklearn.ensemble import RandomForestRegressor
+from pprint import pprint
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
+from sklearn.metrics import mean_squared_error, r2_score
+
+
+##########################
+# Reading the data files #
+##########################
+
+df_data = pd.read_csv('data.csv')
+df_holidays = pd.read_csv('holidays.csv')
+df_stores = pd.read_csv('stores.csv')
+df_oil = pd.read_csv('oil.csv')
+df_transactions = pd.read_csv('transactions.csv')
+df_bonus = pd.read_csv('bonusQ.csv')
+
+################################
+# Basic descriptive statistics #
+################################
+
+# Statistical descriptions have been used in order to get an overall picture of the data: measures of central tendency (mean, midrange); dispersion of data (range, quartiles, interquartile range, variance, standard deviation).
+# find central tendencies of data
+data_summary = df_data.describe()
+data_summary.loc['range'] = data_summary.loc['max'] - data_summary.loc['min']
+data_summary.loc['midrange'] = (data_summary.loc['max']+data_summary.loc['min'])/2
+data_summary.loc['IQR'] = data_summary.loc['75%']-data_summary.loc['25%']
+data_summary.loc['var'] = data_summary.loc['std']**2
+data_summary
+
+# Look at bonusQ details
+bonusQ_summary = df_bonus.describe()
+bonusQ_summary.loc['range'] = bonusQ_summary.loc['max'] - bonusQ_summary.loc['min']
+bonusQ_summary.loc['midrange'] = (bonusQ_summary.loc['max']+bonusQ_summary.loc['min'])/2
+bonusQ_summary.loc['IQR'] = bonusQ_summary.loc['75%']-bonusQ_summary.loc['25%']
+bonusQ_summary.loc['var'] = bonusQ_summary.loc['std']**2
+bonusQ_summary
+
+# Look at oil data details
+oil_summary = df_oil.describe()
+oil_summary.loc['range'] = oil_summary.loc['max'] - oil_summary.loc['min']
+oil_summary.loc['midrange'] = (oil_summary.loc['max']+oil_summary.loc['min'])/2
+oil_summary.loc['IQR'] = oil_summary.loc['75%']-oil_summary.loc['25%']
+oil_summary.loc['var'] = oil_summary.loc['std']**2
+oil_summary
+
+# Look at stores data details
+stores_summary = df_stores.describe()
+stores_summary.loc['range'] = stores_summary.loc['max'] - stores_summary.loc['min']
+stores_summary.loc['midrange'] = (stores_summary.loc['max']+stores_summary.loc['min'])/2
+stores_summary.loc['IQR'] = stores_summary.loc['75%']-stores_summary.loc['25%']
+stores_summary.loc['var'] = stores_summary.loc['std']**2
+stores_summary
+
+# Look at transactions data details
+transactions_summary = df_transactions.describe()
+transactions_summary.loc['range'] = transactions_summary.loc['max'] - transactions_summary.loc['min']
+transactions_summary.loc['midrange'] = (transactions_summary.loc['max']+transactions_summary.loc['min'])/2
+transactions_summary.loc['IQR'] = transactions_summary.loc['75%']-transactions_summary.loc['25%']
+transactions_summary.loc['var'] = transactions_summary.loc['std']**2
+transactions_summary
+
+#######################
+# Data visualizations #
+#######################
+
+# Generate only the data of the dairy product group and get the total sales per day
+data_dairy = df_data[df_data.family == 'DAIRY']
+data_dairy_date = data_dairy.groupby(['date']).sum()
+
+# Plot the dairy sales per day
+plt.plot(data_dairy_date.index ,data_dairy_date['sales'])
+plt.xlabel("Time in years")
+plt.ylabel('Number of dairy sales')
+plt.xticks([0,365,365*2,365*3,365*4],['2013','2014','2015','2016','2017'])
+plt.savefig('Dairy_sales_years.png', dpi=200)  
+plt.show()
+
+# Plot the dairy sales for only two months
+one_year_data = data_dairy_date[data_dairy_date.index >='2017-06-01']
+one_year_data
+plt.plot(one_year_data.index ,one_year_data['sales'])
+plt.xlabel("Time in weeks")
+plt.ylabel("Number of sales")
+plt.xticks([0,7,14,21,28,35,42,49,56] ,['1','2','3','4','5','6','7','8','9'])
+plt.savefig('Dairy_sales_2months.png', dpi=200)
+plt.show()
+
+# Plot the dairy sales for one week
+one_year_data = data_dairy_date[data_dairy_date.index >='2017-07-24']
+plt.bar(one_year_data.index ,one_year_data['sales'])
+plt.xlabel("Day of the week")
+plt.ylabel("Number of sales")
+plt.xticks([0,1,2,3,4,5,6,7] ,['mon','tue','wed','thur','fri','sat','sun','mon'])
+plt.show()
+
+# For the rest of the visualizations, the datasets will first be cleaned
+
+#####################
+# Cleaning the data #
+#####################
+
+# Remove all families except for the diary family
+df_data = df_data.drop(df_data[df_data.family != 'DAIRY'].index)
+# Clean the holidays dataset by remaining only the National holidays
+df_holidays = df_holidays.drop(df_holidays[df_holidays.locale != 'National'].index)
+# Remove the dates that do not correspond to the data dates
+df_holidays = df_holidays[~(df_holidays['date'] < '2013-01-01')]
+df_holidays = df_holidays[~(df_holidays['date'] > '2017-07-31')]
+# Remove the holidays that are transferred to another date and working days
+df_holidays = df_holidays.drop(df_holidays[df_holidays.transferred != False].index)
+df_holidays = df_holidays.drop(df_holidays[df_holidays.type == 'Work Day'].index)
+df_holidays = df_holidays.drop(['locale', 'locale_name', 'description', 'transferred'], axis=1)
+# Drop the city, state, and type columns of the stores dataframe
+df_stores = df_stores.drop(['city', 'state', 'type'], axis=1)
+
+# Checking the oil dataset for missing values
+df_oil.isnull().sum() #total of 43 null values in the column dcoilwtico
+# Filling the null values
+df_oil = df_oil.fillna(method = "bfill")
+df_oil.isnull().sum().sum() # check for remaining null values
+
+
+####################
+# Data integration #
+####################
+
+data_1 = pd.merge(df_data, df_holidays, on='date', how='left').fillna('None')
+data_1 = pd.merge(data_1, df_stores, on='store_nbr', how='left')
+data_1 = pd.merge(data_1, df_oil, on='date', how='left')
+data_1 = data_1.drop(data_1[data_1.sales == 0].index)
+
+# Removing the columns that do not add value to the dataframe
+data_1 = data_1.drop(['id', 'family'], axis=1)
+
+# Since first of january is skewing the overall data, these dates will be removed from the dataset
+data_1 = data_1.drop(data_1[data_1.date == '2013-01-01'].index)
+data_1 = data_1.drop(data_1[data_1.date == '2014-01-01'].index)
+data_1 = data_1.drop(data_1[data_1.date == '2015-01-01'].index)
+data_1 = data_1.drop(data_1[data_1.date == '2016-01-01'].index)
+data_1 = data_1.drop(data_1[data_1.date == '2017-01-01'].index)
+
+# Generating the details of the dates
+data_1['date'] = pd.to_datetime(data_1['date']).dt.date
+data_1['day'] = pd.DatetimeIndex(data_1['date']).day
+data_1['month'] = pd.DatetimeIndex(data_1['date']).month
+data_1['year'] = pd.DatetimeIndex(data_1['date']).year
+data_1.head()
+
+dates=[]
+
+for row in data_1['date']:
+    dt = row
+    weekday = row.weekday()
+    dates.append(weekday)
+    
+data_1['Weekday']=dates
+
+#############################
+# Visualizations subsequent #
+#############################
+
+# Extract the weekdays and monthdays from the dataset and sum the total sales
+data_sorted_date=data_1.groupby('Weekday').sum()
+data_sorted_date
+
+data_sorted_date2=data_1.groupby('day').sum()
+data_sorted_date2
+
+# Generate a plot with the dairy sales per day over one month
+plt.bar(data_sorted_date.index, data_sorted_date['sales'])
+plt.ylabel('Number of sales in millions')
+plt.xticks([0,1,2,3,4,5,6] ,['mon','tue','wed','thu','fri','sat','sun'])
+plt.xlabel('Day of the week')
+plt.yticks([2000000,4000000,6000000,8000000,10000000,12000000],['2','4','6','8','10','12'])
+plt.savefig('Dairy_sales_total_per_day.png', dpi=200)
+plt.show()
+
+# Plot the oil prices over time
+plt.plot(df_oil.date,df_oil.dcoilwtico)
+plt.ylabel("Oil price")
+plt.xticks([0,270,270*2,270*3,270*4],['2013','2014','2015','2016','2017'])
+plt.xlabel("Year")
+plt.savefig('Oil_price_plot', dpi=200)
+plt.show()
+
+# Dairy sales total per month
+fig = plt.figure(figsize=(10, 4))
+plt.bar(data_sorted_date2.index, data_sorted_date2['sales'])
+plt.ylabel('Number of sales in millions')
+plt.xlabel('Day of the month')
+plt.yticks([1500000,1750000,2000000,2250000,2500000],['1.5','1.75','2','2.25','2.5'])
+ax = plt.gca()
+ax.set(ylim=[1500000, 2500000])
+plt.savefig('Dairy_sales_total_per_month.png', dpi=200)
+plt.show()
+
+#####################
+# Outlier detection #
+#####################
+
+# Choose a random store (3 in this case)
+store_3 = data_1[data_1['store_nbr']== 3]
+store_3
+                               
+ax = plt.gca()
+ax.axes.xaxis.set_ticklabels([])
+ax.axes.yaxis.set_ticklabels([])
+plt.xlabel('time', fontsize = 20)
+plt.ylabel('holidays',fontsize=20)
+
+plt.grid(False)
+
+# First plot the products that are not on promotion
+store_3_nopromo = store_3[store_3['onpromotion'] == 0]
+store_3_nopromo[['date','sales']].plot(kind='scatter',x='date',y='sales',figsize=(10,10))
+
+# Next plot the products that are on promotion
+store_3_promo = store_3[store_3['onpromotion'] != 0]
+store_3_promo[['date','sales']].plot(kind='scatter',x='date',y='sales',figsize=(10,10))
+
+
+##################
+# Test normality #
+##################
+
+# Test sales per cluster if normally distributed 
+daily_cluster = data_1['sales'].groupby([data_1['date'],data_1['cluster']]).sum()
+daily_cluster = daily_cluster.to_frame()
+daily_log = np.log(daily_cluster['sales'])
+sns.distplot(daily_log)
+qqplot(daily_log, line='s')
+plt.show()
+
+# Since the clustered sales are not normally distributed, the cluster variable will also be removed
+data_1 = data_1.drop(['cluster'], axis=1)
+
+# Check normality of sales through QQ-plot
+sns.distplot(data_1['sales'])
+qqplot(data_1['sales'], line ='s')
+plt.show()
+
+# Since the sales are right skewed, the sales are logarithmic transformed
+data_1log = np.log(data_1['sales'])
+data_1['log_sales'] = data_1log
+sns.distplot(data_1['log_sales'])
+qqplot(data_1['log_sales'], line='s')
+plt.show()
+
+########################
+# Correlation analysis #
+########################
+
+# ANOVA test to check whether the holidays/events/etc. are equal on sales or not
+
+# First calculate ratio of the largest to the smallest sample standard deviation
+ratio = data_1.groupby('type').std().max() / data_1.groupby('type').std().min()
+print(ratio)
+# Boxplots for each holiday type
+ax = sns.boxplot(x='type', y='log_sales', data=data_1)
+plt.show()
+
+# ANOVA test
+ANOVA_test = pd.pivot_table(data_1, index='date', columns='type', values='log_sales')
+mod = ols('log_sales ~ type', data = data_1).fit()
+aov_table = sm.stats.anova_lm(mod, typ=1)
+print(aov_table)
+
+# One hot encoding for the holiday types
+one_hot = pd.get_dummies(data_1['type'])
+data_1 = data_1.join(one_hot)
+data_1 = data_1.drop(['type'], axis=1)
+
+# Independent samples t-test for each holiday category compared to all others
+print(ttest_ind(data_1.sales[data_1['None'] == 0],data_1.sales[data_1['None'] == 1]))
+print(ttest_ind(data_1.sales[data_1.Holiday == 0],data_1.sales[data_1.Holiday == 1]))
+print(ttest_ind(data_1.sales[data_1.Additional == 0],data_1.sales[data_1.Additional == 1]))
+print(ttest_ind(data_1.sales[data_1.Bridge == 0],data_1.sales[data_1.Bridge == 1]))
+print(ttest_ind(data_1.sales[data_1.Transfer == 0],data_1.sales[data_1.Transfer == 1]))
+print(ttest_ind(data_1.sales[data_1.Event == 0],data_1.sales[data_1.Event == 1]))
+
+# First a new dataframe will be created to test the correlation of the daily total sales to the oil price
+sum_sales = data_1['sales'].groupby([data_1['date'],data_1['dcoilwtico']]).sum()
+sum_sales = sum_sales.to_frame()
+sum_sales = pd.merge(sum_sales, data_1, on='date', how='left')
+
+# Correlation tables for the IVs and DV
+print(sum_sales.corr(method='pearson', min_periods=1))
+print(data_1.corr(method='pearson', min_periods=1))
+
+# Since there is no strong correlation between sales and promotion, so the promotion will be removed from the data
+data_1 = data_1.drop(['onpromotion'], axis=1)
+
+
+###########################
+# Machine learning models #
+###########################
+
+############################
+# Model 1: Neural networks #
+############################
+
+
+
+####################################
+# Model 2: Random forest regression#
+####################################
+
+# Start with splitting the data into a training and a testing group
+test_store_nbr = data_1['store_nbr'].unique()
+daily_sales = data_1[data_1['store_nbr'].isin(test_store_nbr)]
+X,y = daily_sales[['year','month','day','store_nbr']], daily_sales['log_sales']
+X_train, X_test, y_train, y_test = train_test_split(X,y, test_size = 0.25, random_state = 42)
+
+# Apply the random forest regression
+random_rf = RandomForestRegressor(random_state = 42)
+pprint(random_rf.get_params())
+
+bootstrap = [True, False]
+n_estimators = [int(x) for x in np.linspace(start=200,stop=2000, num = 10)]
+max_depth = [int(x) for x in np.linspace(start=10, stop = 110, num = 11)]
+max_depth.append(None)
+max_features = ['auto','sqrt']
+min_samples_split = [2,5,10]
+min_samples_leaf = [1,2,4]
+random_grid = {
+    'bootstrap' : bootstrap,
+    'n_estimators' : n_estimators,
+    'max_depth' : max_depth,
+    'max_features' : max_features,
+    'min_samples_split' : min_samples_split,
+    'min_samples_leaf' : min_samples_leaf
+}
+pprint(random_grid)
+
+rf_random = RandomizedSearchCV(estimator = random_rf, param_distributions = random_grid,
+                               cv = 3, n_jobs = -1, random_state = 42, n_iter = 3, scoring='neg_mean_absolute_error',
+                               verbose = 2, return_train_score = True)
+rf_random.fit(X_train,y_train)
+
+def evaluate(model, X_test, y_test) :
+    prediction = model.predict(X_test)
+    error = abs(prediction - y_test)
+    mape = 100 * np.mean(error/y_test)
+    accuracy = 100 - mape
+    print('Model Performance')
+    print('Average Error: {:0.4f} degrees.'.format(np.mean(error)))
+    print('Accuracy = {:0.2f}%.'.format(accuracy))
+    
+    return accuracy
+random_model = rf_random.best_estimator_
+evaluate(random_model, X_test, y_test)
+
+#Generate sales result using above model
+test_df = data_1.copy()
+test_df['year'] = '2015'
+test_df['month'] = '11'
+test_df['store_nbr'] = '5'
+result_rf = random_model.predict(test_df[['year','month','day','store_nbr']])
+result_rf_df = pd.DataFrame(result_rf)
+final_result = pd.merge(test_df, result_rf_df, left_index=True, right_index=True)
+final_result = final_result.rename(columns={0:'sales'})
+final_result = final_result[['store_nbr', 'sales']]
+final_result.shape
+final_result
+
+# %%
+#Building Neural network
+network = models.Sequential()
+network.add(layers.Dense(20, activation='tanh', input_shape=(116,)))
+network.add(layers.Dense(10, activation='tanh'))
+network.add(layers.Dense(10, activation='tanh'))
+network.add(layers.Dense(10, activation='tanh'))
+network.add(layers.Dense(1, activation='tanh'))
+
+#Compile network
+network.compile(optimizer='adam',
+                loss='squared_hinge',
+                metrics=['accuracy'])
+
+#edit data to suit neural network (one-hot-fix and dropping)
+
+data_2 = data_1
+
+one_hot = pd.get_dummies(data_1['Weekday'])
+data_2 = data_2.join(one_hot, rsuffix='weekday_')
+
+one_hot = pd.get_dummies(data_1['day'])
+data_2 = data_2.join(one_hot, rsuffix='_day')
+
+one_hot = pd.get_dummies(data_1['month'])
+data_2 = data_2.join(one_hot, rsuffix='_month')
+
+one_hot = pd.get_dummies(data_1['year'])
+data_2 = data_2.join(one_hot, rsuffix='_year')
+
+one_hot = pd.get_dummies(data_1['store_nbr'])
+data_2 = data_2.join(one_hot, rsuffix='_store_nbr')
+
+data_2 = data_2.drop(['Weekday', 'day', 'month', 'year', 'store_nbr','date'],axis=1)
+data_2[np.isnan(data_2)] = 0
+data_2
+y=data_2['log_sales']
+X=data_2.drop(['log_sales','sales'],1) #'dcoilwtico'
+
+#Split training data
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+#edit data to suit neural network
+
+X_train = np.asarray(X_train).astype('float32')
+X_test = np.asarray(X_test).astype('float32')
+y_train = np.asarray(y_train).astype('float32')
+X_test = np.asarray(X_test).astype('float32')
+
+train_labels = to_categorical(y_train)
+test_labels = to_categorical(y_test)
+
+#Run neural network
+
+history = network.fit(X_train, train_labels, epochs=6, batch_size=20)
+
+#Evaluate network
+
+plt.plot(history.history['accuracy'])
+plt.title('Network Train Accuracy')
+
+plt.plot(history.history['loss'])
+plt.title('Network Train Loss')
+
+test_loss, test_acc = network.evaluate(X_test, test_labels)
+
+print('Test Accuracy: ', test_acc, '\nTest Loss: ', test_loss)
